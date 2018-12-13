@@ -1,0 +1,284 @@
+Centos7-安装配置zabbix4.0步骤详解
+IP：118.24.118.38 		Zabbix监控服务器
+IP：118.24.179.50 	  被监控服务器(客户端)
+
+[root@angeltxy tools]# yum install -y httpd mariadb-server mariadb php php-mysql php-gd libjpeg* php-ldap php-odbc php-pear php-xml php-xmlrpc php-mhash
+[root@angeltxy tools]# cd  /etc/httpd/conf/
+[root@angeltxy conf]# cp httpd.conf httpd.conf.bak
+[root@angeltxy conf]# vim httpd.conf
+
+ServerName angeltxy               //修改为主机名
+ServerName localhost		第二次
+
+<IfModule dir_module>
+    DirectoryIndex index.html index.php  //修改
+</IfModule>
+
+[root@angeltxy conf]# cd /etc/
+[root@angeltxy etc]# cp php.ini php.ini.bak
+[root@angeltxy etc]# vim php.ini
+date.timezone = PRC                 //修改为中国时区
+
+[root@angeltxy etc]# systemctl stop firewalld.service
+[root@angeltxy etc]# setenforce 0
+setenforce: SELinux is disabled
+[root@angeltxy etc]# systemctl start httpd.service	//启动httpd服务
+[root@angeltxy etc]# systemctl start mariadb.service	//启动mariadb服务
+
+[root@angeltxy etc]# netstat -anpt|grep 80
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      16207/httpd         
+[root@angeltxy etc]# netstat -anpt|grep 3306
+tcp        0      0 0.0.0.0:3306            0.0.0.0:*               LISTEN      16478/mysqld        
+
+ mysql_secure_installation     //初始化mysql数据库，并配置root用户密码
+
+[root@angeltxy etc]# mysql_secure_installation
+
+NOTE: RUNNING ALL PARTS OF THIS SCRIPT IS RECOMMENDED FOR ALL MariaDB
+      SERVERS IN PRODUCTION USE!  PLEASE READ EACH STEP CAREFULLY!
+
+In order to log into MariaDB to secure it, we'll need the current
+password for the root user.  If you've just installed MariaDB, and
+you haven't set the root password yet, the password will be blank,
+so you should just press enter here.
+
+Enter current password for root (enter for none): 
+OK, successfully used password, moving on...
+
+Setting the root password ensures that nobody can log into the MariaDB
+root user without the proper authorisation.
+
+Set root password? [Y/n] y
+New password:	zkm2018
+Re-enter new password:	zkm2018
+Password updated successfully!
+Reloading privilege tables..
+ ... Success!
+
+By default, a MariaDB installation has an anonymous user, allowing anyone
+to log into MariaDB without having to have a user account created for
+them.  This is intended only for testing, and to make the installation
+go a bit smoother.  You should remove them before moving into a
+production environment.
+
+Remove anonymous users? [Y/n] n
+ ... skipping.
+
+Normally, root should only be allowed to connect from 'localhost'.  This
+ensures that someone cannot guess at the root password from the network.
+
+Disallow root login remotely? [Y/n] n
+ ... skipping.
+
+By default, MariaDB comes with a database named 'test' that anyone can
+access.  This is also intended only for testing, and should be removed
+before moving into a production environment.
+
+Remove test database and access to it? [Y/n] n
+ ... skipping.
+
+Reloading the privilege tables will ensure that all changes made so far
+will take effect immediately.
+
+Reload privilege tables now? [Y/n] n
+ ... skipping.
+
+Cleaning up...
+
+
+
+其余选项一直n就可以了，出现下面这几句就说明设置成功了
+
+All done!  If you've completed all of the above steps, your MariaDB
+installation should now be secure.
+
+Thanks for using MariaDB!
+
+
+[root@angeltxy etc]# vim /var/www/html/index.php	//创建一个测试页，测试LAMP是否搭建成功
+
+<?php
+
+phpinfo();
+
+?>
+
+[root@angeltxy etc]# 
+
+访问http://118.24.118.38,出现如下页面则说明测试成功：
+
+PHP Version 5.4.16
+
+[root@angeltxy etc]# mysql -u root -p	//root用户登陆数据库
+Enter password:		zkm2018
+Welcome to the MariaDB monitor.  Commands end with ; or \g.
+Your MariaDB connection id is 5
+Server version: 5.5.60-MariaDB MariaDB Server
+
+Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+MariaDB [(none)]> CREATE DATABASE zabbix character set utf8 collate utf8_bin;	//创建zabbix数据库（中文编码格式）
+Query OK, 1 row affected (0.00 sec)
+
+MariaDB [(none)]> GRANT all ON zabbix.* TO 'zabbix'@'%' IDENTIFIED BY 'admin123';  //授予zabbix用户zabbix数据库的所有权限，密码admin123
+Query OK, 0 rows affected (0.00 sec)
+
+MariaDB [(none)]> flush privileges;          //刷新权限
+Query OK, 0 rows affected (0.00 sec)
+
+MariaDB [(none)]> quit                     //退出数据库  
+Bye
+[root@angeltxy etc]# vim /var/www/html/index.php         //修改测试页内容，测试zabbix用户是否能够登陆数据库
+
+$link=mysql_connect('118.24.118.38','zabbix','admin123');	//IP：公网地址
+if($link) echo "<h1>Success!!</h1>";
+else echo "Fail!!";
+mysql_close();
+
+?>
+
+访问http://118.24.118.38,出现如下页面则说明测试成功：
+Success!!
+
+----------------以下开始部署zabbix Server-------
+[root@angeltxy etc]# cd /tools/
+[root@angeltxy tools]# rpm -ivh php-mbstring-5.4.16-45.el7.x86_64.rpm 
+Preparing...                          ################################# [100%]
+Updating / installing...
+   1:php-mbstring-5.4.16-45.el7       ################################# [100%]
+[root@angeltxy tools]# rpm -ivh php-bcmath-5.4.16-45.el7.x86_64.rpm			//安装zabbix所需要EPEL源和zabbix的yum源
+Preparing...                          ################################# [100%]
+Updating / installing...
+   1:php-bcmath-5.4.16-45.el7         ################################# [100%]
+
+[root@angeltxy tools]# wget http://repo.zabbix.com/zabbix/4.0/rhel/7/x86_64/zabbix-release-4.0-1.el7.noarch.rpm
+[root@angeltxy tools]# rpm -ivh zabbix-release-4.0-1.el7.noarch.rpm 
+warning: zabbix-release-4.0-1.el7.noarch.rpm: Header V4 RSA/SHA512 Signature, key ID a14fe591: NOKEY
+Preparing...                          ################################# [100%]
+Updating / installing...
+   1:zabbix-release-4.0-1.el7         ################################# [100%]
+[root@angeltxy tools]# yum install zabbix-server-mysql zabbix-web-mysql -y
+[root@angeltxy tools]# zcat /usr/share/doc/zabbix-server-mysql-4.0.0/create.sql.gz | mysql -uzabbix -p -h 118.24.118.38 zabbix
+Enter password: admin123
+
+//以上为导入数据到数据库zabbix中(最后一个zabbix是数据库zabbix)，且因为用户zabbix是%(任意主机)，所以登录时需要加上当前主机ip(-h 192.168.80.181),密码是用户zabbix登陆密码admin123
+
+[root@angeltxy tools]# cd /etc/zabbix/
+[root@angeltxy zabbix]# ll
+total 24
+drwxr-x--- 2 apache apache  4096 Oct  9 10:10 web
+-rw-r----- 1 root   zabbix 16808 Oct  1 16:41 zabbix_server.conf
+[root@angeltxy zabbix]# cp zabbix_server.conf zabbix_server.conf.bak
+[root@angeltxy zabbix]# ll
+total 44
+drwxr-x--- 2 apache apache  4096 Oct  9 10:10 web
+-rw-r----- 1 root   zabbix 16808 Oct  1 16:41 zabbix_server.conf
+-rw-r----- 1 root   root   16808 Oct  9 10:21 zabbix_server.conf.bak
+[root@angeltxy zabbix]# vim zabbix_server.conf
+[root@angeltxy zabbix]# grep -n '^'[a-Z] zabbix_server.conf
+38:LogFile=/var/log/zabbix/zabbix_server.log
+49:LogFileSize=0
+72:PidFile=/var/run/zabbix/zabbix_server.pid
+82:SocketDir=/var/run/zabbix
+101:DBName=zabbix
+117:DBUser=zabbix
+128:DBPassword=admin123					//配置数据库用户及密码,修改如下配置代码行
+360:SNMPTrapperFile=/var/log/snmptrap/snmptrap.log
+478:Timeout=4
+521:AlertScriptsPath=/usr/lib/zabbix/alertscripts
+532:ExternalScripts=/usr/lib/zabbix/externalscripts
+568:LogSlowQueries=3000
+
+[root@angeltxy zabbix]# cd /etc/httpd/conf.d
+[root@angeltxy conf.d]# ll
+total 24
+-rw-r--r-- 1 root root 2926 Jun 27 21:48 autoindex.conf
+-rw-r--r-- 1 root root  691 Apr 13 03:04 php.conf
+-rw-r--r-- 1 root root  366 Jun 27 21:49 README
+-rw-r--r-- 1 root root 1252 Jun 27 02:07 userdir.conf
+-rw-r--r-- 1 root root  824 Jun 27 02:07 welcome.conf
+-rw-r--r-- 1 root root  870 Sep 18 22:03 zabbix.conf
+[root@angeltxy conf.d]# cp zabbix.conf zabbix.conf.bak
+[root@angeltxy conf.d]# vim zabbix.conf
+
+php_value date.timezone Asia/Shanghai		//修改时区
+
+[root@angeltxy conf.d]# systemctl enable zabbix-server
+Created symlink from /etc/systemd/system/multi-user.target.wants/zabbix-server.service to /usr/lib/systemd/system/zabbix-server.service.
+[root@angeltxy conf.d]# systemctl restart zabbix-server
+[root@angeltxy conf.d]# netstat -anpt | grep zabbix	//监听在10051端口上,如果没监听成功，可重启zabbix-server服务试试
+[root@angeltxy conf.d]# systemctl restart httpd.service
+
+访问http://118.24.118.38/zabbix          //注意这里IE浏览器打不开，最好用火狐或者360等浏览器
+
+Welcome to
+Zabbix 4.0
+
+[root@angeltxy conf.d]# cat /var/log/zabbix/zabbix_server.log
+ 19874:20181009:133132.957 [Z3001] connection to database 'zabbix' failed: [1045] Access denied for user 'zabbix'@'localhost' (using password: YES)
+ 19874:20181009:133132.957 database is down: reconnecting in 10 seconds
+
+解决方法：
+[root@angeltxy conf.d]# vim /etc/zabbix/zabbix_server.conf  
+
+38:LogFile=/var/log/zabbix/zabbix_server.log
+49:LogFileSize=0
+72:PidFile=/var/run/zabbix/zabbix_server.pid
+82:SocketDir=/var/run/zabbix
+101:DBName=zabbix
+119:DBUser=root
+132:DBPassword=zkm2018
+364:SNMPTrapperFile=/var/log/snmptrap/snmptrap.log
+482:Timeout=4
+525:AlertScriptsPath=/usr/lib/zabbix/alertscripts
+536:ExternalScripts=/usr/lib/zabbix/externalscripts
+572:LogSlowQueries=3000
+
+http://118.24.118.38/zabbix
+Admin
+zabbix
+
+登录成功
+-----------配置代理端-就是被控服务器----如果服务器也需要被自己监控也需要安装--
+[www.ab.com@ ~]# rpm -ivh http://repo.zabbix.com/zabbix/3.5/rhel/7/x86_64/zabbix-release-3.5-1.el7.noarch.rpm
+[www.ab.com@ ~]# yum install -y zabbix-agent
+[www.ab.com@ ~]# vim /etc/zabbix/zabbix_agentd.conf     //配置zabbix agent，修改为如下代码行
+
+[root@luckytxy tools]# wget http://repo.zabbix.com/zabbix/4.0/rhel/7/x86_64/zabbix-release-4.0-1.el7.noarch.rpm
+[root@luckytxy tools]# rpm -ivh zabbix-release-4.0-1.el7.noarch.rpm 
+warning: zabbix-release-4.0-1.el7.noarch.rpm: Header V4 RSA/SHA512 Signature, key ID a14fe591: NOKEY
+Preparing...                          ################################# [100%]
+Updating / installing...
+   1:zabbix-release-4.0-1.el7         ################################# [100%]
+[root@luckytxy tools]# yum install -y zabbix-agent
+[root@luckytxy tools]# cd /etc/zabbix
+[root@luckytxy tools]# cd /etc/zabbix/
+[root@luckytxy zabbix]# ll
+total 16
+-rw-r--r-- 1 root root 10743 Oct  1 16:41 zabbix_agentd.conf
+drwxr-xr-x 2 root root  4096 Oct  9 14:13 zabbix_agentd.d
+[root@luckytxy zabbix]# cp zabbix_agentd.conf zabbix_agentd.conf.bak 
+[root@luckytxy zabbix]# vim /etc/zabbix/zabbix_agentd.conf
+[root@luckytxy zabbix]# grep -n '^'[a-Z] /etc/zabbix/zabbix_agentd.conf
+13:PidFile=/var/run/zabbix/zabbix_agentd.pid
+32:LogFile=/var/log/zabbix/zabbix_agentd.log
+43:LogFileSize=0
+99:Server=172.27.16.14
+142:ServerActive=172.27.16.14
+155:Hostname=luckytxy
+273:Include=/etc/zabbix/zabbix_agentd.d/*.conf
+
+[root@luckytxy zabbix]# systemctl stop firewalld.service
+[root@luckytxy zabbix]# setenforce 0
+setenforce: SELinux is disabled
+[root@luckytxy zabbix]# systemctl enable zabbix-agent.service
+Created symlink from /etc/systemd/system/multi-user.target.wants/zabbix-agent.service to /usr/lib/systemd/system/zabbix-agent.service.
+[root@luckytxy zabbix]# systemctl restart zabbix-agent.service
+[root@luckytxy zabbix]# netstat -anpt | grep zabbix	//监听在10050端口
+tcp        0      0 0.0.0.0:10050           0.0.0.0:*               LISTEN      22039/zabbix_agentd 
+tcp        0      0 0.0.0.0:10051           0.0.0.0:*               LISTEN      20637/zabbix_server 
+tcp6       0      0 :::10050                :::*                    LISTEN      22039/zabbix_agentd 
+tcp6       0      0 :::10051                :::*                    LISTEN      20637/zabbix_server 
+[root@luckytxy zabbix]# 
